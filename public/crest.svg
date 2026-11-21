@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000" viewBox="0 0 2000 2000">
+  <defs>
+    <style>
+      .g{fill:none;stroke:#fbbf24;stroke-width:8}
+      .f{fill:#fbbf24}
+      .flame{fill:url(#flameGradient)}
+    </style>
+    <linearGradient id="flameGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#f59e0b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d97706;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer Circle -->
+  <circle cx="1000" cy="1000" r="900" class="g"/>
+  
+  <!-- Main Crest Structure -->
+  <g transform="translate(1000,1000)">
+    <!-- Inner Circle -->
+    <circle r="520" class="g"/>
+    
+    <!-- Guardian Shield Shape -->
+    <path d="M0 -380 L110 -60 L320 -60 L160 40 L210 360 L0 140 L-210 360 L-160 40 L-320 -60 L-110 -60 Z" class="g"/>
+    
+    <!-- Central Flame Symbol -->
+    <g>
+      <!-- Main flame body -->
+      <path d="M0 -150 C-30 -120 -40 -80 -30 -40 C-20 0 0 20 0 50 C0 20 20 0 30 -40 C40 -80 30 -120 0 -150 Z" class="flame"/>
+      
+      <!-- Inner flame details -->
+      <path d="M0 -100 C-15 -80 -20 -50 -15 -20 C-10 10 0 25 0 45 C0 25 10 10 15 -20 C20 -50 15 -80 0 -100 Z" class="f"/>
+      
+      <!-- Flame core -->
+      <circle r="15" cy="0" class="f"/>
+    </g>
+    
+    <!-- Ceremonial Elements -->
+    <g>
+      <!-- Top crown elements -->
+      <path d="M-60 -300 L-30 -320 L0 -300 L30 -320 L60 -300" class="g"/>
+      
+      <!-- Side ceremonial wings -->
+      <path d="M-250 -150 C-280 -130 -290 -100 -270 -80 L-200 -120" class="g"/>
+      <path d="M250 -150 C280 -130 290 -100 270 -80 L200 -120" class="g"/>
+      
+      <!-- Bottom ceremonial base -->
+      <path d="M-150 280 C-180 300 -150 330 -120 320 L120 320 C150 330 180 300 150 280" class="g"/>
+    </g>
+    
+    <!-- Sigil Details -->
+    <g>
+      <!-- Corner sigils -->
+      <circle r="25" cx="-200" cy="-200" class="g"/>
+      <circle r="25" cx="200" cy="-200" class="g"/>
+      <circle r="25" cx="-200" cy="200" class="g"/>
+      <circle r="25" cx="200" cy="200" class="g"/>
+      
+      <!-- Inner corner marks -->
+      <path d="M-200 -200 L-185 -185" class="g"/>
+      <path d="M200 -200 L185 -185" class="g"/>
+      <path d="M-200 200 L-185 185" class="g"/>
+      <path d="M200 200 L185 185" class="g"/>
+    </g>
+    
+    <!-- Text placeholder for tier designation -->
+    <text x="0" y="250" font-family="serif" font-size="48" fill="#fbbf24" text-anchor="middle" font-weight="bold">GUARDIAN</text>
+  </g>
+  
+  <!-- Outer decorative elements -->
+  <g>
+    <!-- Cardinal direction markers -->
+    <circle r="20" cx="1000" cy="100" class="f"/>
+    <circle r="20" cx="1900" cy="1000" class="f"/>
+    <circle r="20" cx="1000" cy="1900" class="f"/>
+    <circle r="20" cx="100" cy="1000" class="f"/>
+  </g>
+</svg>

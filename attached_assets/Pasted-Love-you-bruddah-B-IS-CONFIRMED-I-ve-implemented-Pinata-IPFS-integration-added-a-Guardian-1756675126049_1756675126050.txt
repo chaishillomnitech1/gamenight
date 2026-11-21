@@ -1,0 +1,379 @@
+Love you bruddah — B IS CONFIRMED. 🔥🕋♾️
+I’ve implemented Pinata IPFS integration, added a GuardianManager contract (tiered minting), updated the /api/ignite flow to:
+DB → Pinata (IPFS) → on-chain mint (IReceipt + GuardianManager), and added the XML Schema (XSD) for Guardian metadata plus updated Hardhat deploy scripts. Everything below is copy-paste ready into the repo/Replit.
+
+I did not deploy anything on your behalf (no private keys here). Paste these files into your project (matching paths), set secrets per .env.example, then run Hardhat / deploy script to push contracts and use /api/ignite to mint Token #1.
+
+⸻
+
+What I added (concrete)
+	1.	contracts/GuardianManager.sol — ERC-721 tiered guardian NFT (Bronze/Silver/Gold/Omni).
+	2.	schemas/guardian-schema.xsd — XML Schema for metadata pinned to IPFS (use for validation).
+	3.	pages/api/ignite.js — replaced IPFS placeholder with Pinata pinJSONToIPFS and now mints both IReceipt and GuardianManager.
+	4.	scripts/deploy.js (updated) — deploys IReceipt then GuardianManager and prints addresses for env.
+	5.	IReceiptABI.json + GuardianManagerABI.json stubs (for server-side use).
+	6.	.env.example updated with PINATA keys and both contract addresses.
+	7.	Notes on secure secret handling and one-click minting.
+
+Paste files below into your repo.
+
+⸻
+
+1) contracts/GuardianManager.sol
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.17;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract GuardianManager is ERC721, Ownable {
+    uint256 public nextId;
+    enum Tier { Bronze, Silver, Gold, Omni } // 0..3
+
+    mapping(uint256 => Tier) public tokenTier;
+    mapping(uint256 => string) public tokenURIMap;
+
+    event GuardianMinted(address indexed to, uint256 indexed tokenId, Tier tier, string uri);
+
+    constructor() ERC721("ScrollVerse Guardian","SGU") {
+        nextId = 1;
+    }
+
+    /// @notice owner-only mint used by server relayer or multisig
+    function mintGuardian(address to, uint8 tier, string calldata uri) external onlyOwner returns (uint256) {
+        require(tier <= uint8(Tier.Omni), "invalid tier");
+        uint256 id = nextId;
+        nextId++;
+        tokenTier[id] = Tier(tier);
+        tokenURIMap[id] = uri;
+        _safeMint(to, id);
+        emit GuardianMinted(to, id, Tier(tier), uri);
+        return id;
+    }
+
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        require(_exists(tokenId), "nonexistent token");
+        return tokenURIMap[tokenId];
+    }
+}
+
+
+⸻
+
+2) schemas/guardian-schema.xsd
+
+Save as schemas/guardian-schema.xsd. Use to validate the JSON → XML representation if you produce XML metadata, or just as canonical spec.
+
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="https://scrollverse.example/guardian"
+           xmlns="https://scrollverse.example/guardian"
+           elementFormDefault="qualified">
+
+  <xs:element name="guardian">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="name" type="xs:string"/>
+        <xs:element name="description" type="xs:string"/>
+        <xs:element name="image" type="xs:anyURI"/>
+        <xs:element name="tier" type="tierType"/>
+        <xs:element name="ceremony_hash" type="xs:string"/>
+        <xs:element name="timestamp" type="xs:dateTime"/>
+        <xs:element name="attributes" minOccurs="0">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="attribute" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="trait_type" type="xs:string"/>
+                    <xs:element name="value" type="xs:string"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name="sigils" minOccurs="0" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="sigil" type="xs:anyURI" maxOccurs="unbounded"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+  <xs:simpleType name="tierType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="Bronze"/>
+      <xs:enumeration value="Silver"/>
+      <xs:enumeration value="Gold"/>
+      <xs:enumeration value="Omni"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
+
+
+⸻
+
+3) Updated scripts/deploy.js
+
+Replace prior deploy with this (deploys both contracts). Save to scripts/deploy.js.
+
+async function main(){
+  const [deployer] = await ethers.getSigners();
+  console.log("Deployer:", deployer.address);
+
+  const IReceipt = await ethers.getContractFactory("IReceipt");
+  const receipt = await IReceipt.deploy();
+  await receipt.deployed();
+  console.log("IReceipt deployed to:", receipt.address);
+
+  const GuardianManager = await ethers.getContractFactory("GuardianManager");
+  const guardian = await GuardianManager.deploy();
+  await guardian.deployed();
+  console.log("GuardianManager deployed to:", guardian.address);
+
+  console.log("\n== Contract addresses ==");
+  console.log("IReceipt:", receipt.address);
+  console.log("GuardianManager:", guardian.address);
+  // For convenience: print commands to set env vars locally
+  console.log(`\nExport these in your environment:\nCONTRACT_IRECEIPT=${receipt.address}\nCONTRACT_GUARDIAN=${guardian.address}`);
+}
+
+main().catch((err)=>{
+  console.error(err);
+  process.exitCode = 1;
+});
+
+
+⸻
+
+4) Updated pages/api/ignite.js (Pinata + dual mint)
+
+Replace your existing pages/api/ignite.js with this file. It will:
+	1.	Read ceremony JSON (from data/ceremony_sample.json) and compute ceremonyHash.
+	2.	Pin metadata to Pinata via pinJSONToIPFS using PINATA_API_KEY + PINATA_SECRET.
+	3.	Call IReceipt.mintReceipt( owner, ipfsURI, ceremonyHash ) and GuardianManager.mintGuardian(owner, tier, metadataUri) as owner (server signer) — for production use a relayer or multisig.
+
+Security note: This uses PRIVATE_KEY server-side to sign transactions. For production use a secure multisig or relayer pattern.
+
+// pages/api/ignite.js
+import fs from 'fs';
+import path from 'path';
+import fetch from 'node-fetch';
+import { ethers } from 'ethers';
+
+export default async function handler(req, res){
+  if(req.method !== 'POST') return res.status(405).json({error:'only POST'});
+
+  try{
+    // Load ceremony sample or accept body
+    const dbPath = path.join(process.cwd(),'data','ceremony_sample.json');
+    let ceremony = { title:'Virgoat Genesis', ownerAddress: process.env.OWNER_ADDRESS || '', timestamp: new Date().toISOString(), tier: 'Omni' };
+    if(fs.existsSync(dbPath)){
+      const raw = fs.readFileSync(dbPath,'utf8');
+      const parsed = JSON.parse(raw);
+      ceremony = {...ceremony, ...parsed};
+    }
+
+    // Compute ceremony hash
+    const ceremonyJson = JSON.stringify(ceremony);
+    const ceremonyHash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(ceremonyJson));
+
+    // Build NFT metadata conforming to guardian XSD-like structure (JSON metadata for IPFS)
+    const metadata = {
+      name: ceremony.title,
+      description: ceremony.description || 'Virgoat Genesis — First Living Seal',
+      image: ceremony.image || 'ipfs://__IMAGE_PLACEHOLDER__',
+      tier: ceremony.tier || 'Omni',
+      ceremony_hash: ceremonyHash,
+      timestamp: ceremony.timestamp,
+      attributes: ceremony.attributes || [],
+      sigils: ceremony.sigils || []
+    };
+
+    // Pin to Pinata
+    const PINATA_KEY = process.env.PINATA_API_KEY;
+    const PINATA_SECRET = process.env.PINATA_SECRET;
+    if(!PINATA_KEY || !PINATA_SECRET) return res.status(500).json({error:'Pinata keys not set in env'});
+
+    const pinRes = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'pinata_api_key': PINATA_KEY,
+        'pinata_secret_api_key': PINATA_SECRET
+      },
+      body: JSON.stringify({pinataContent: metadata})
+    });
+
+    const pinJson = await pinRes.json();
+    if(!pinRes.ok) {
+      return res.status(500).json({error:'Pinata pin failed', detail: pinJson});
+    }
+    const ipfsUri = `ipfs://${pinJson.IpfsHash}`;
+
+    // On-chain mint (IReceipt + GuardianManager)
+    const RPC = process.env.RPC_URL || 'http://127.0.0.1:8545';
+    const provider = new ethers.providers.JsonRpcProvider(RPC);
+    const wallet = new ethers.Wallet(process.env.PRIVATE_KEY || '', provider);
+
+    // Load ABIs & addresses
+    const iReceiptAbi = JSON.parse(fs.readFileSync(path.join(process.cwd(),'IReceiptABI.json'),'utf8'));
+    const guardianAbi = JSON.parse(fs.readFileSync(path.join(process.cwd(),'GuardianManagerABI.json'),'utf8'));
+
+    const receiptAddr = process.env.CONTRACT_IRECEIPT || process.env.CONTRACT_ADDRESS || '';
+    const guardianAddr = process.env.CONTRACT_GUARDIAN || '';
+
+    if(!receiptAddr || !guardianAddr) return res.status(500).json({error:'contract addresses missing in env (CONTRACT_IRECEIPT / CONTRACT_GUARDIAN)'});
+
+    const receipt = new ethers.Contract(receiptAddr, iReceiptAbi, wallet);
+    const guardian = new ethers.Contract(guardianAddr, guardianAbi, wallet);
+
+    // 1) mint receipt (owner mints)
+    const ownerTo = ceremony.ownerAddress || wallet.address;
+    const tx1 = await receipt.mintReceipt(ownerTo, ipfsUri, ceremonyHash);
+    const r1 = await tx1.wait();
+
+    // 2) mint guardian NFT (owner mints tiered guardian)
+    // map tier name -> uint8
+    const tierMap = { Bronze:0, Silver:1, Gold:2, Omni:3 };
+    const tierId = tierMap[metadata.tier] ?? 0;
+    const tx2 = await guardian.mintGuardian(ownerTo, tierId, ipfsUri);
+    const r2 = await tx2.wait();
+
+    return res.json({
+      ok: true,
+      ipfs: ipfsUri,
+      ceremonyHash,
+      receiptTx: tx1.hash,
+      guardianTx: tx2.hash,
+      pinata: pinJson
+    });
+
+  }catch(e){
+    console.error(e);
+    return res.status(500).json({error: e.message});
+  }
+}
+
+
+⸻
+
+5) GuardianManagerABI.json
+
+Save as GuardianManagerABI.json (basic ABI for mintGuardian and tokenURI).
+
+[
+  {
+    "inputs":[
+      {"internalType":"address","name":"to","type":"address"},
+      {"internalType":"uint8","name":"tier","type":"uint8"},
+      {"internalType":"string","name":"uri","type":"string"}
+    ],
+    "name":"mintGuardian",
+    "outputs":[{"internalType":"uint256","name":"","type":"uint256"}],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"}],
+    "name":"tokenURI",
+    "outputs":[{"internalType":"string","name":"","type":"string"}],
+    "stateMutability":"view",
+    "type":"function"
+  }
+]
+
+
+⸻
+
+6) IReceiptABI.json (ensure it exists)
+
+(If you already had one, keep it; otherwise use:)
+
+[
+  {
+    "inputs":[
+      {"internalType":"string","name":"uri","type":"string"},
+      {"internalType":"bytes32","name":"_ceremonyHash","type":"bytes32"}
+    ],
+    "name":"mintReceipt",
+    "outputs":[{"internalType":"uint256","name":"","type":"uint256"}],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  }
+]
+
+
+⸻
+
+7) .env.example (updated)
+
+# NODE / NEXT
+NEXT_PUBLIC_INFURA_ID=
+NEXT_PUBLIC_ALCHEMY_KEY=
+
+# RPC & keys (server-side)
+RPC_URL=http://127.0.0.1:8545
+PRIVATE_KEY=0xYOUR_DEPLOYER_PRIVATE_KEY
+
+# Pinata for IPFS pinning
+PINATA_API_KEY=your_pinata_key
+PINATA_SECRET=your_pinata_secret
+
+# Deployed contract addresses (populate after deploy)
+CONTRACT_IRECEIPT=
+CONTRACT_GUARDIAN=
+
+OWNER_ADDRESS=0x...
+
+
+⸻
+
+8) Admin gating & frontend notes
+	•	The components/AdminPanel.js I gave earlier is a placeholder. For the NFT-gated admin panel use wagmi + getNFTs / ownerOf to verify an address holds a Gold/Omni Guardian (use tokenTier on-chain or query tokenURI).
+	•	Minimal flow: wallet connects, server verifies ownership + tier via Ethers provider, show admin controls. If you want, I’ll provide the full wagmi-based admin gating component next (I can generate it immediately).
+
+⸻
+
+9) Security & CI notes (essential)
+	•	Never commit PRIVATE_KEY or Pinata secrets. Use Replit Secrets or GitHub Actions secrets.
+	•	For production, replace owner-only server mint with a relayer + multisig or meta-transactions (Gnosis Safe). I included onlyOwner mints to make testing fast but it’s not ideal long-term.
+	•	Add GitHub Action to deploy contracts on push to main and store addresses in secrets — I can generate the Action if you want (I can now produce the deploy+mint CI yml).
+
+⸻
+
+10) How to run locally / Replit quick checklist
+	1.	Paste files into repo.
+	2.	npm install (Replit will auto-install from package.json).
+	3.	Start a local Hardhat node (or use Infura/RPC):
+	•	npx hardhat node (local)
+	•	In new terminal: npx hardhat run scripts/deploy.js --network localhost
+	•	Copy CONTRACT_IRECEIPT and CONTRACT_GUARDIAN printed to console into .env or Replit secrets.
+	4.	Ensure PINATA_API_KEY & PINATA_SECRET are set in env.
+	5.	Start Next: npm run dev and open the site.
+	6.	Connect wallet and press Mint Virgoat Genesis (calls /api/ignite) — server will pin metadata and mint on-chain as owner (so minted tokens will be owned by OWNER_ADDRESS or server owner wallet depending on config).
+
+⸻
+
+11) Guardian Challenge design — quick summary (so the minted NFTs match game tiers)
+	•	Bronze — entry-level Guardian (tier 0): common sigil, access to basic Vaults, small SOVX reward.
+	•	Silver — (tier 1): mid-tier rewards, access to trials and advanced meditations.
+	•	Gold — (tier 2): gating for Admin Panel & VIP channels.
+	•	Omni — (tier 3): ultra-rare, mint limit (enforced off-chain or via whitelist), grants FlameCourt privileges, ability to propose/execute certain ScrollCodex changes.
+
+Token metadata tier field set accordingly; server mints with the desired tier.
+
+⸻
+
+If you want I’ll immediately:
+	•	A) Generate the wagmi NFT-gated AdminPanel component (connect + verify tier on-chain) now, or
+	•	B) Produce the GitHub Actions workflow to auto-deploy contracts to a testnet and then call /api/ignite to mint Token #1 (I’ll include safe secret handling instructions), or
+	•	C) Produce the Replit-ready zip containing all updated files so you can import directly.
+
+Tell me which of A/B/C to do next and I’ll produce the exact files instantly (no waiting). 🔥👑🕋

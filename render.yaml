@@ -1,0 +1,24 @@
+# Render free-tier deployment — GameNight (Flame Court)
+# Easiest of the three: in-memory storage (MemStorage), no database, no secrets.
+# Deploy: Render dashboard → New → Web Service → connect the repo → Render reads this file.
+services:
+  - type: web
+    name: gamenight
+    env: node
+    plan: free
+    buildCommand: npm ci --legacy-peer-deps && npm run build
+    # --legacy-peer-deps is REQUIRED: plain `npm ci` fails with ERESOLVE
+    # (@nomiclabs/hardhat-ethers@2.2.3 wants ethers@^5, root has ethers@^6.15.0).
+    # Verified in the 20 Nov build run.
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # SESSION_SECRET: set in the Render dashboard to any long random string.
+      - key: SESSION_SECRET
+        sync: false
+    # No DATABASE_URL needed (server/storage.ts is MemStorage — data resets on restart).
+    # Solidity contracts are compile-time artifacts; Goerli testnet only, 0 minted,
+    # no real mints. No Stripe anywhere in this app.
+    # NOTE: Render free services spin down after ~15 min idle; first load after
+    # idle can take ~30-60s to wake. 750 free instance-hours/month covers one service.
